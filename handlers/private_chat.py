@@ -1,7 +1,8 @@
 import logging
+from config import settings
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
-from telegram import ChatPermissions
+from telegram import ChatPermissions, Bot
 from services.storage import PendingUsersStorage
 
 logger = logging.getLogger(__name__)
@@ -48,15 +49,19 @@ async def handle_captcha_button(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("⚠️ Ошибка. Попробуйте позже.")
 
 
-async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Обрабатывает ответ на капчу"""
+async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     user_answer = update.message.text
 
     try:
         user_data = storage.get_user_data(user_id)
         if not user_data or "expected_answer" not in context.user_data:
-            await update.message.reply_text("❌ Время проверки истекло")
+            admin_bot = Bot(token=settings.TOKEN)
+            await admin_bot.send_message(
+                chat_id=settings.ADMIN_CHAT_ID,
+                text=f"❌ Пользователь @{update.effective_user.username} заигнорил капчу\n"
+                     f"ID: {user_id}\n"
+            )
             return
 
         if user_answer == context.user_data["expected_answer"]:
@@ -68,6 +73,16 @@ async def handle_captcha_answer(update: Update, context: ContextTypes.DEFAULT_TY
             await update.message.reply_text("✅ Проверка пройдена! Теперь вы можете писать в чате.")
             storage.remove_user(user_id)
         else:
+            # Уведомление админу о неудачной попытке
+            admin_bot = Bot(token=settings.TOKEN)
+            await admin_bot.send_message(
+                chat_id=settings.ADMIN_CHAT_ID,
+                text=f"❌ Пользователь @{update.effective_user.username} не прошел капчу\n"
+                     f"ID: {user_id}\n"
+                     f"Введенный ответ: {user_answer}\n"
+                     f"Правильный ответ: {context.user_data['expected_answer']}"
+            )
+
             await update.message.reply_text("❌ Неверный ответ. Попробуйте ещё раз.")
 
     except Exception as e:

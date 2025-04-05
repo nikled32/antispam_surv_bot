@@ -5,6 +5,7 @@ load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN") or "ВАШ_ТОКЕН"
 CAPTCHA_TIME = 120                             # Время на капчу (сек)
+ADMIN_CHAT_ID = "404670699"
 ADMIN_IDS = [123456789]                        # ID админов
 WHITELIST = ["GoodBot", "HelperBot"]           # Разрешённые боты
 
