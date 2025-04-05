@@ -36,6 +36,7 @@ class BotRunner:
                 .token(settings.TOKEN)
                 .connect_timeout(30)
                 .read_timeout(30)
+                .concurrent_updates(True)  # Важно для обработки параллельных запросов
                 .build()
             )
 
@@ -46,16 +47,16 @@ class BotRunner:
             await self.application.initialize()
             await self.application.start()
 
-            # Для версии 20.x+ используем create_task для polling
-            self.application.updater = self.application.updater or self.application.bot
-            asyncio.create_task(self.application.updater.start_polling())
+            # Используем create_task для избежания конфликтов
+            asyncio.create_task(self.application.updater.start_polling(drop_pending_updates=True))
 
             logger.info("Бот успешно запущен")
             await self.shutdown_event.wait()
 
         except Exception as e:
             logger.error(f"Критическая ошибка: {e}", exc_info=True)
-            raise
+            logger.critical(f"Фатальная ошибка: {e}", exc_info=True)
+            raise  # После этого Fly.io перезапустит контейнер
         finally:
             await self._safe_shutdown()
 
