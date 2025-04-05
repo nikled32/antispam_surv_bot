@@ -37,15 +37,22 @@ class BotRunner:
                 .connect_timeout(30)
                 .read_timeout(30)
                 .concurrent_updates(True)  # Важно для обработки параллельных запросов
+                .post_shutdown(self._on_shutdown)
                 .build()
             )
 
             # Регистрация обработчиков
             self._setup_handlers()
 
-            logger.info("Запуск бота...")
-            await self.application.initialize()
-            await self.application.start()
+            # Очистка предыдущих обновлений
+            await self.application.bot.delete_webhook(drop_pending_updates=True)
+
+            logger.info("Запускаем бота...")
+            await self.application.run_polling(
+                drop_pending_updates=True,
+                close_loop=False,
+                stop_signals=[]
+            )
 
             # Используем create_task для избежания конфликтов
             asyncio.create_task(self.application.updater.start_polling(drop_pending_updates=True))
@@ -53,12 +60,18 @@ class BotRunner:
             logger.info("Бот успешно запущен")
             await self.shutdown_event.wait()
 
+        except asyncio.CancelledError:
+            logger.info("Бот получил запрос на остановку")
         except Exception as e:
             logger.error(f"Критическая ошибка: {e}", exc_info=True)
             logger.critical(f"Фатальная ошибка: {e}", exc_info=True)
             raise  # После этого Fly.io перезапустит контейнер
         finally:
             await self._safe_shutdown()
+
+    async def _on_shutdown(self, app):
+        logger.info("Завершаем работу...")
+        self._should_stop.set()
 
     def _setup_handlers(self):
         """Регистрация всех обработчиков"""
