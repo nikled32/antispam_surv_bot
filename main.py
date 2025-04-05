@@ -4,7 +4,7 @@ import signal
 import sys
 from telegram import Update
 from telegram.ext import (
-    Application,
+    ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
@@ -24,18 +24,20 @@ logger = logging.getLogger(__name__)
 
 class BotRunner:
     def __init__(self):
-        self.application = None  # Переименовано в application для ясности
+        self.application = None
         self.shutdown_event = asyncio.Event()
 
     async def run(self):
         """Основной цикл работы бота"""
         try:
-            # Инициализация приложения
-            self.application = Application.builder() \
-                .token(settings.TOKEN) \
-                .connect_timeout(30) \
-                .read_timeout(30) \
+            # Инициализация приложения (актуальный способ для версии 20.x+)
+            self.application = (
+                ApplicationBuilder()
+                .token(settings.TOKEN)
+                .connect_timeout(30)
+                .read_timeout(30)
                 .build()
+            )
 
             # Регистрация обработчиков
             self._setup_handlers()
@@ -44,15 +46,16 @@ class BotRunner:
             await self.application.initialize()
             await self.application.start()
 
-            # Запускаем polling
-            await self.application.updater.start_polling()
-            logger.info("Бот успешно запущен")
+            # Для версии 20.x+ используем create_task для polling
+            self.application.updater = self.application.updater or self.application.bot
+            asyncio.create_task(self.application.updater.start_polling())
 
-            # Ожидаем сигнала завершения
+            logger.info("Бот успешно запущен")
             await self.shutdown_event.wait()
 
         except Exception as e:
             logger.error(f"Критическая ошибка: {e}", exc_info=True)
+            raise
         finally:
             await self._safe_shutdown()
 
@@ -65,7 +68,7 @@ class BotRunner:
             pattern="^captcha_"
         ))
         self.application.add_handler(MessageHandler(
-            filters.TEXT & filters.ChatType.PRIVATE,
+            filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE,
             private_chat.handle_captcha_answer
         ))
 
@@ -81,8 +84,9 @@ class BotRunner:
     async def _safe_shutdown(self):
         """Безопасное завершение работы"""
         if self.application:
+            logger.info("Завершение работы бота...")
             try:
-                if self.application.updater:
+                if hasattr(self.application, 'updater') and self.application.updater:
                     await self.application.updater.stop()
                 await self.application.stop()
                 await self.application.shutdown()
@@ -97,9 +101,11 @@ async def shutdown(signal, runner):
 
 
 def main():
-    runner = BotRunner()
+    # Создаем и устанавливаем глобальный event loop
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    runner = BotRunner()
 
     try:
         # Настройка обработки сигналов
@@ -116,13 +122,14 @@ def main():
     except Exception as e:
         logger.error(f"Фатальная ошибка: {e}", exc_info=True)
     finally:
-        # Корректное завершение
-        tasks = asyncio.all_tasks(loop=loop)
-        for task in tasks:
+        # Корректное завершение всех задач
+        pending = asyncio.all_tasks(loop=loop)
+        for task in pending:
             task.cancel()
-        loop.run_until_complete(asyncio.gather(*tasks, return_exceptions=True))
+
+        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
         loop.close()
-        logger.info("Бот завершил работу")
+        logger.info("Event loop закрыт")
 
 
 if __name__ == "__main__":
